@@ -1,36 +1,62 @@
-// server.js
-const express = require('express');
-const mongoose = require('mongoose');
-const cors = require('cors');
+const { CosmosClient } = require("@azure/cosmos");
 
-const app = express();
-app.use(cors());
-app.use(express.json());
+module.exports = async function (context, req) {
+    // Cosmos DB configuration
+    const endpoint = process.env.COSMOS_DB_URI;  // Use environment variables for better security
+    const key = process.env.COSMOS_DB_PRIMARY_KEY; // Fetch the primary key from environment variables
+    const client = new CosmosClient({ endpoint, key });
 
-mongoose.connect('mongodb+srv://kashyapmistry2021:ws7Gqbfgy3*hQZ5@db1cluster1.skf8r.mongodb.net/?retryWrites=true&w=majority&appName=DB1Cluster1')
-.then(() => console.log('MongoDB connected successfully'))
-.catch((err) => console.log('Error connecting to MongoDB:', err));
+    const database = client.database("BankingDB");  // Replace with your actual database name
+    const container = database.container("Accounts"); // Replace with your actual container name
 
-const userSchema = new mongoose.Schema({
-username: String,
-password: String,
-balance: Number,
-transactions: Array,
-});
+    // Handle GET Request - Retrieve all accounts
+    if (req.method === "GET") {
+        try {
+            const { resources: items } = await container.items.readAll().fetchAll();
+            context.res = {
+                status: 200,
+                body: items
+            };
+        } catch (error) {
+            context.res = {
+                status: 500,
+                body: "Error fetching accounts: " + error.message
+            };
+        }
+    }
 
-const User = mongoose.model('User', userSchema);
+    // Handle POST Request - Add a new account
+    else if (req.method === "POST") {
+        const newAccount = req.body;
 
-app.post('/login', async (req, res) => {
-const { username, password } = req.body;
-const user = await User.findOne({ username, password });
-if (user) {
-    res.json({ message: 'Login successful', balance: user.balance, transactions: user.transactions });
-} else {
-    res.status(401).json({ message: 'Login failed' });
-}
-});
+        // Ensure valid data is provided
+        if (!newAccount.id || !newAccount.accountHolder || typeof newAccount.balance !== "number") {
+            context.res = {
+                status: 400,
+                body: "Please provide a valid account with 'id', 'accountHolder', and 'balance'."
+            };
+            return;
+        }
 
-app.listen(10000, () => {
-console.log('Server running on port 5000');
-});
+        try {
+            const { resource: createdItem } = await container.items.create(newAccount);
+            context.res = {
+                status: 201,
+                body: createdItem
+            };
+        } catch (error) {
+            context.res = {
+                status: 500,
+                body: "Error creating account: " + error.message
+            };
+        }
+    }
 
+    // Handle unsupported HTTP methods
+    else {
+        context.res = {
+            status: 405,
+            body: "Method Not Allowed"
+        };
+    }
+};
